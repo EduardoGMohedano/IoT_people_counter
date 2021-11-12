@@ -1,3 +1,4 @@
+#include "image_proc.h"
 #include <Melopero_AMG8833.h>
 Melopero_AMG8833 amg;
 
@@ -17,6 +18,11 @@ const byte interruptPin = 3;
 #define LED_PERSON_ENTERED  2
 #define LED_PERSON_LEFT     4
 
+#define SENSOR_SIZE_PIXELS    (8)
+#define IMAGE_SIZE_UP_FACTOR  (2)
+#define NEW_IMAGE_SIZE        (SENSOR_SIZE_PIXELS * IMAGE_SIZE_UP_FACTOR)
+
+
 //Structs to get person counter
 typedef struct{
   int previous_state; //This states contain the number of persons in each zone
@@ -27,7 +33,7 @@ Zones zone_1{0,0};
 Zones zone_2{0,0};
 
 uint16_t person_counter = 0;
-
+float dest_2d[INTERPOLATED_ROWS * INTERPOLATED_COLS];
 
 //The interrupt servire routine. This function will be called each time the 
 //interrupt is triggered.
@@ -212,10 +218,21 @@ void loop() {
     //or
     #else
         amg.updatePixelMatrix();
-        get_person_in_zones_with_max(amg.pixelMatrix);
+        //get_person_in_zones_with_max(amg.pixelMatrix);
     #endif
-    
-    count_person();
+
+    image_t src, dst; 
+    src.pixels = (uint32_t*)amg.pixelMatrix;         //Asigning pointer to the begining of the matrix, now because of the typecasting some information from decimals is being lost multiply by 10 all the pixels to avoid it
+    src.w = SENSOR_SIZE_PIXELS;
+    src.h = SENSOR_SIZE_PIXELS;
+
+    //Destiny image struct init
+    dst.pixels = new uint32_t(NEW_IMAGE_SIZE* NEW_IMAGE_SIZE);
+    dst.w = NEW_IMAGE_SIZE;
+    dst.h = NEW_IMAGE_SIZE;
+
+    scale(&src, &dst, (float) NEW_IMAGE_SIZE, (float) NEW_IMAGE_SIZE);
+    //count_person();
   
     #ifdef DEBUG
     //Print out the interrupt matrix.
@@ -223,18 +240,15 @@ void loop() {
     Serial.print("**** interrupt received! **** \t at Temperature: ");
     Serial.print(amg.thermistorTemperature);
     Serial.println("°C");
-    Serial.println("Interrupt Matrix: ");
-    amg.updateInterruptMatrix();
-    for (int x = 0; x < 8; x++){
-      for (int y = 0; y < 8; y++){
-            Serial.print(amg.interruptMatrix[x][y]);
-            //Serial.print(amg.pixelMatrix[x][y]);
-        Serial.print(" ");
-      }
-      Serial.println();
+    //Serial.println("Interrupt Matrix: ");
+    //amg.updateInterruptMatrix();
+    for (int x = 1; x <= (NEW_IMAGE_SIZE * NEW_IMAGE_SIZE); x++){
+      Serial.print( dst.pixels[x-1]);
+      Serial.print(", ");
+      if( x%NEW_IMAGE_SIZE == 0 ) Serial.println();
     }
     #endif
-    
+    delete dst.pixels;
     intReceived = false;
   }
 
