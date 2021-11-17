@@ -2,13 +2,13 @@
 #include <Melopero_AMG8833.h>
 Melopero_AMG8833 amg;
 
+
 #define   DEBUG   1
 //#define   SIMPLE_COUNT    1
 #define   AVERAGE_TEMP_FROM_MATRIX      1
 //#define   AVERAGE_TEMP_FROM_THERMISTOR    1
 
-//The high and low temperature thresholds. If a temperature that exceeds 
-//these values is detected an interrupt will be triggered. The temperatures
+//The high and low temperature thresholds. If a temperature that exceeds these values is detected an interrupt will be triggered. The temperatures
 //are expressed in Celsius degrees.
 float highThreshold = 25.0;
 float lowThreshold = 18;
@@ -33,7 +33,9 @@ Zones zone_1{0,0};
 Zones zone_2{0,0};
 
 uint16_t person_counter = 0;
-float dest_2d[INTERPOLATED_ROWS * INTERPOLATED_COLS];
+
+image_t src, dst;
+
 
 //The interrupt servire routine. This function will be called each time the 
 //interrupt is triggered.
@@ -76,54 +78,58 @@ void get_person_in_zones(bool pixels[8][8]){
   
 }
 
-void get_person_in_zones_with_max(float pixels[8][8]){
+//void get_person_in_zones_with_max(float pixels[8][8]){
+void get_person_in_zones_with_max(uint32_t* pixels, uint8_t width, uint8_t height){
   //Depending on height param, we will count the 1's in both zones and count people
   int ones = 0;
   float average = 0.0;
   
   #ifdef   AVERAGE_TEMP_FROM_MATRIX
       //Getting average of first zone
-      for(int i = 0; i < 4; i++){
-        for(int j = 0; j < 8; j++){
-          average += pixels[i][j];
+      for(int i = 0; i < (width/2); i++){
+        for(int j = 0; j < height; j++){
+          average += *(pixels+(width*i)+j);
+          
         }
       }
-      average/=32;
+      average/=(width*height/2);
+      Serial.print("average temp is:");
+      Serial.println(average);
   #elif   AVERAGE_TEMP_FROM_THERMISTOR
       amg.updateThermistorTemperature();       //Update AMGs thermistor temperature and print it.
       average = amg.thermistorTemperature;
   #endif
   
   //Analyzing zone 1
-  for(int i = 0; i < 4; i++){
-    for(int j = 0; j < 8; j++){
-      if ( pixels[i][j] > average) ones++;
+  for(int i = 0; i < (width/2); i++){
+    for(int j = 0; j < height; j++){
+      if ( *(pixels+(width*i)+j) > average) ones++;
      }
   }
   zone_1.previous_state = zone_1.current_state;
-  zone_1.current_state = ones;    //Contando los maximos de temperatura
+  zone_1.current_state = ones;    //Counting valuues which are above average temperature 
 
   ones = 0;
   average = 0.0;
   #ifdef   AVERAGE_TEMP_FROM_MATRIX
       //Getting average of first zone
-      for(int i = 4; i < 8; i++){
-        for(int j = 0; j < 8; j++){
-          average += pixels[i][j];
+      for(int i = (width/2); i < width; i++){
+        for(int j = 0; j < height; j++){
+          average += *(pixels+(width*i)+j);
         }
       }
-      average/=32;
+      average/=(width*height/2);
   #elif   AVERAGE_TEMP_FROM_THERMISTOR
       amg.updateThermistorTemperature();       //Update AMGs thermistor temperature and print it.
       average = amg.thermistorTemperature;
   #endif
   
   //Analyzing zone 2
-  for(int i = 4; i < 8; i++){
-    for(int j = 0; j < 8; j++){
-      if ( pixels[i][j] > average) ones++;
+    for(int i = (width/2); i < width; i++){
+      for(int j = 0; j < height; j++){
+        if ( *(pixels+(width*i)+j) > average) ones++;
+      }
     }
-  }
   zone_2.previous_state = zone_2.current_state;
   zone_2.current_state = ones;   
 }
@@ -166,7 +172,6 @@ void count_person(){
 
 
 
-
 void setup() {
   Serial.begin(115200);
 
@@ -202,36 +207,56 @@ void setup() {
 
   digitalWrite(LED_PERSON_ENTERED, LOW);
   digitalWrite(LED_PERSON_LEFT, LOW);
+    
 }
 
-void loop() {
-  
+void core0(void* args){
+  while(1){
+  }
+}
 
-  //Check if an interrupt occurred.
+
+void loop() {
+    //Check if an interrupt occurred.
   //The interrupt occurred flag gets set by the interrupt service routine
   //each time an interrupt is triggered.
   if (intReceived){
-    //Get pesons count on the zones
+
+    /* Below definitons are executed to get an interpolated temperature image
+     * the dimensions are determined by IMAGE_SIZE_UP_FACTOR macro
+     */
+    amg.updatePixelMatrix(); // This might be executed later
+    uint32_t pixelptr[SENSOR_SIZE_PIXELS*SENSOR_SIZE_PIXELS];
+    for(int i = 0; i < SENSOR_SIZE_PIXELS; i++){
+      for(int j = 0; j < SENSOR_SIZE_PIXELS; j++){
+          pixelptr[(8*i)+j] = (uint32_t) amg.pixelMatrix[i][j];
+      }
+    }
+
+    image_t src, dst; 
+    src.pixels = pixelptr;         //Asigning pointer to the begining of the matrix, now because of the typecasting some information from decimals is being lost multiply by 10 all the pixels to avoid it
+    src.w = SENSOR_SIZE_PIXELS;
+    src.h = SENSOR_SIZE_PIXELS;
+
+    //Destiny image struct init
+    dst.pixels = new uint32_t[NEW_IMAGE_SIZE* NEW_IMAGE_SIZE]{};
+    dst.w = NEW_IMAGE_SIZE;
+    dst.h = NEW_IMAGE_SIZE;
+
+    //Getting interpolated image in dst 
+    scale(&src, &dst, (float) IMAGE_SIZE_UP_FACTOR, (float) IMAGE_SIZE_UP_FACTOR);
+    
+    //Getting persons count on the zones 1 and 2
     #ifdef SIMPLE_COUNT
         amg.updateInterruptMatrix();
         get_person_in_zones(amg.interruptMatrix);
     //or
     #else
-        amg.updatePixelMatrix();
-        //get_person_in_zones_with_max(amg.pixelMatrix);
+        //amg.updatePixelMatrix();
+        //get_person_in_zones_with_max(dst.pixels, dst.w, dst.h);
     #endif
-
-    image_t src, dst; 
-    src.pixels = (uint32_t*)amg.pixelMatrix;         //Asigning pointer to the begining of the matrix, now because of the typecasting some information from decimals is being lost multiply by 10 all the pixels to avoid it
-    src.w = SENSOR_SIZE_PIXELS;
-    src.h = SENSOR_SIZE_PIXELS;
-
-    //Destiny image struct init
-    dst.pixels = new uint32_t(NEW_IMAGE_SIZE* NEW_IMAGE_SIZE);
-    dst.w = NEW_IMAGE_SIZE;
-    dst.h = NEW_IMAGE_SIZE;
-
-    scale(&src, &dst, (float) NEW_IMAGE_SIZE, (float) NEW_IMAGE_SIZE);
+    
+    
     //count_person();
   
     #ifdef DEBUG
@@ -248,9 +273,8 @@ void loop() {
       if( x%NEW_IMAGE_SIZE == 0 ) Serial.println();
     }
     #endif
-    delete dst.pixels;
+
+    //delete dst.pixels;
     intReceived = false;
   }
-
-  //delay(100);
 }

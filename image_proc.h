@@ -1,10 +1,7 @@
 #ifndef IMGPROC_H
 #define IMGPROC_H
 
-    #include <stdint.h>
-
-    #define INTERPOLATED_COLS     (12)
-    #define INTERPOLATED_ROWS INTERPOLATED_COLS   
+    #include <stdint.h> 
     
     /*
      * Below code is a helper to get a bicubic interpolation for our image sensor 
@@ -30,11 +27,17 @@
         image->pixels[(y*image->w) + x] = color;
     }
     void scale(image_t *src, image_t *dst, float scalex, float scaley){
+        /*char buffer2 [60];
+        sprintf(buffer2, "Source pointer inside is: %p", src->pixels);
+        Serial.println(buffer2);
+        sprintf(buffer2, "Destiny pointer inside is: %p", dst->pixels);
+        Serial.println(buffer2);*/
+
         int newWidth = (int)src->w*scalex;
         int newHeight= (int)src->h*scaley;
         int x, y;
         for(x= 0, y=0; y < newHeight; x++){
-            if(x > newWidth){
+            if(x == newWidth){
                 x = 0; y++;
             }
             //float gx = x / (float)(newWidth) * (src->w - 1);
