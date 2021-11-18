@@ -2,10 +2,21 @@
 #include <Melopero_AMG8833.h>
 Melopero_AMG8833 amg;
 
+/* Hardware connection must be as follows: 
+ *  AMG sensor
+ *  I2C SDA       GPIO21 
+ *  I2C SCL       GPIO22
+ *  AMG INT PIN   GPIO3
+ * 
+ *  Indicator LEDs
+ *  LED GREEN     GPIO2   INDICATES A PERSON IS GETTING IN THE ROOM
+ *  LED RED       GPIO4   INDICATES A PERSON IS LEAVING THE ROOM
+ */
 
-#define   DEBUG   1
-//#define   SIMPLE_COUNT    1
-#define   AVERAGE_TEMP_FROM_MATRIX      1
+
+#define   DEBUG   1                         //DEBUG MACRO
+//#define   SIMPLE_COUNT    1               //ALGORITHM TO BE EXECUTED MACRO
+#define   AVERAGE_TEMP_FROM_MATRIX      1   //ALGORITHM TO BE EXECUTED MACRO, IN THIS CASE WE TAKE THE AVERAGE TEMPERATURE OF SCALED IMAGE
 //#define   AVERAGE_TEMP_FROM_THERMISTOR    1
 
 //The high and low temperature thresholds. If a temperature that exceeds these values is detected an interrupt will be triggered. The temperatures
@@ -15,7 +26,7 @@ float lowThreshold = 18;
 
 volatile bool intReceived = false;
 const byte interruptPin = 3;
-#define LED_PERSON_ENTERED  2
+#define LED_PERSON_ENTERED  2           //Macros for LED number pins that will show whether a person is leaving or getting into a room
 #define LED_PERSON_LEFT     4
 
 #define SENSOR_SIZE_PIXELS    (8)
@@ -110,7 +121,7 @@ void get_person_in_zones_with_max(uint32_t* pixels, uint8_t width, uint8_t heigh
      }
   }
   zone_1.previous_state = zone_1.current_state;
-  zone_1.current_state = ones/2;    //Counting valuues which are above average temperature 
+  zone_1.current_state = ones/2;    //Counting values which are above average temperature 
 
   ones = 0;
   #ifdef   AVERAGE_TEMP_FROM_MATRIX

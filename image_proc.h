@@ -27,12 +27,6 @@
         image->pixels[(y*image->w) + x] = color;
     }
     void scale(image_t *src, image_t *dst, float scalex, float scaley){
-        /*char buffer2 [60];
-        sprintf(buffer2, "Source pointer inside is: %p", src->pixels);
-        Serial.println(buffer2);
-        sprintf(buffer2, "Destiny pointer inside is: %p", dst->pixels);
-        Serial.println(buffer2);*/
-
         int newWidth = (int)src->w*scalex;
         int newHeight= (int)src->h*scaley;
         int x, y;
@@ -40,8 +34,6 @@
             if(x == newWidth){
                 x = 0; y++;
             }
-            //float gx = x / (float)(newWidth) * (src->w - 1);
-            //float gy = y / (float)(newHeight) * (src->h - 1);
             // Image should be clamped at the edges and not scaled.
             float gx = max(x / (float)(newWidth) * (src->w) - 0.5f, src->w - 1);
             float gy = max(y / (float)(newHeight) * (src->h) - 0.5, src->h - 1);
