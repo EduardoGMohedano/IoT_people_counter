@@ -33,8 +33,7 @@ Zones zone_1{0,0};
 Zones zone_2{0,0};
 
 uint16_t person_counter = 0;
-
-image_t src, dst;
+int interrupt_no;
 
 
 //The interrupt servire routine. This function will be called each time the 
@@ -82,19 +81,23 @@ void get_person_in_zones(bool pixels[8][8]){
 void get_person_in_zones_with_max(uint32_t* pixels, uint8_t width, uint8_t height){
   //Depending on height param, we will count the 1's in both zones and count people
   int ones = 0;
-  float average = 0.0;
+  static float average = 0.0;
+  static float average2 = 0.0;
   
   #ifdef   AVERAGE_TEMP_FROM_MATRIX
-      //Getting average of first zone
-      for(int i = 0; i < (width/2); i++){
-        for(int j = 0; j < height; j++){
-          average += *(pixels+(width*i)+j);
-          
+      if( interrupt_no == 1 ){
+          average = 0.0;
+        //Getting average of first zone
+        for(int i = 0; i < (width/2); i++){
+          for(int j = 0; j < height; j++){
+            average += *(pixels+(width*i)+j);
+            
+          }
         }
+        average/=(width*height/2);
+        Serial.print("*Average Temperature is: ");
+        Serial.println(average);
       }
-      average/=(width*height/2);
-      Serial.print("average temp is:");
-      Serial.println(average);
   #elif   AVERAGE_TEMP_FROM_THERMISTOR
       amg.updateThermistorTemperature();       //Update AMGs thermistor temperature and print it.
       average = amg.thermistorTemperature;
@@ -107,53 +110,39 @@ void get_person_in_zones_with_max(uint32_t* pixels, uint8_t width, uint8_t heigh
      }
   }
   zone_1.previous_state = zone_1.current_state;
-  zone_1.current_state = ones;    //Counting valuues which are above average temperature 
+  zone_1.current_state = ones/2;    //Counting valuues which are above average temperature 
 
   ones = 0;
-  average = 0.0;
   #ifdef   AVERAGE_TEMP_FROM_MATRIX
-      //Getting average of first zone
-      for(int i = (width/2); i < width; i++){
-        for(int j = 0; j < height; j++){
-          average += *(pixels+(width*i)+j);
+      if( interrupt_no == 1 ){
+         average2 = 0.0;
+        //Getting average of second zone
+        for(int i = (width/2); i < width; i++){
+          for(int j = 0; j < height; j++){
+            average2 += *(pixels+(width*i)+j);
+          }
         }
+        average2/=(width*height/2);
       }
-      average/=(width*height/2);
   #elif   AVERAGE_TEMP_FROM_THERMISTOR
       amg.updateThermistorTemperature();       //Update AMGs thermistor temperature and print it.
-      average = amg.thermistorTemperature;
+      average2 = amg.thermistorTemperature;
   #endif
   
   //Analyzing zone 2
     for(int i = (width/2); i < width; i++){
       for(int j = 0; j < height; j++){
-        if ( *(pixels+(width*i)+j) > average) ones++;
+        if ( *(pixels+(width*i)+j) > average2) ones++;
       }
     }
   zone_2.previous_state = zone_2.current_state;
-  zone_2.current_state = ones;   
+  zone_2.current_state = ones/2;   
 }
 
 void count_person(){
   //Moving from zone 1 to zone 2 means leaving the room
   if(  zone_2.current_state >  zone_2.previous_state ){
     if (  zone_1.current_state <  zone_1.previous_state  ){
-      person_counter++;
-      #ifdef DEBUG
-          digitalWrite(LED_PERSON_ENTERED, HIGH);
-          delay(100);
-          digitalWrite(LED_PERSON_ENTERED, LOW);
-          delay(50);
-          digitalWrite(LED_PERSON_ENTERED, HIGH);
-          delay(100);
-          digitalWrite(LED_PERSON_ENTERED, LOW);
-      #endif
-    }
-  }
-
-  //Moving from zone 2 to zone 1 means getting into the room
-  if(  zone_2.current_state <  zone_2.previous_state ){
-    if (  zone_1.current_state >  zone_1.previous_state  ){
       person_counter--;
       #ifdef DEBUG
           digitalWrite(LED_PERSON_LEFT, HIGH);
@@ -163,6 +152,22 @@ void count_person(){
           digitalWrite(LED_PERSON_LEFT, HIGH);
           delay(100);
           digitalWrite(LED_PERSON_LEFT, LOW);
+      #endif
+    }
+  }
+
+  //Moving from zone 2 to zone 1 means getting into the room
+  if(  zone_2.current_state <  zone_2.previous_state ){
+    if (  zone_1.current_state >  zone_1.previous_state  ){
+      person_counter++;
+      #ifdef DEBUG
+          digitalWrite(LED_PERSON_ENTERED, HIGH);
+          delay(100);
+          digitalWrite(LED_PERSON_ENTERED, LOW);
+          delay(50);
+          digitalWrite(LED_PERSON_ENTERED, HIGH);
+          delay(100);
+          digitalWrite(LED_PERSON_ENTERED, LOW);
       #endif
     }
   }
@@ -207,6 +212,8 @@ void setup() {
 
   digitalWrite(LED_PERSON_ENTERED, LOW);
   digitalWrite(LED_PERSON_LEFT, LOW);
+
+  interrupt_no = 0;
     
 }
 
@@ -225,6 +232,7 @@ void loop() {
     /* Below definitons are executed to get an interpolated temperature image
      * the dimensions are determined by IMAGE_SIZE_UP_FACTOR macro
      */
+    interrupt_no < 2 ? interrupt_no++ : interrupt_no = 1;
     amg.updatePixelMatrix(); // This might be executed later
     uint32_t pixelptr[SENSOR_SIZE_PIXELS*SENSOR_SIZE_PIXELS];
     for(int i = 0; i < SENSOR_SIZE_PIXELS; i++){
@@ -239,7 +247,9 @@ void loop() {
     src.h = SENSOR_SIZE_PIXELS;
 
     //Destiny image struct init
-    dst.pixels = new uint32_t[NEW_IMAGE_SIZE* NEW_IMAGE_SIZE]{};
+    //dst.pixels = new uint32_t[NEW_IMAGE_SIZE* NEW_IMAGE_SIZE]{};
+    dst.pixels = (uint32_t*) malloc(NEW_IMAGE_SIZE* NEW_IMAGE_SIZE*4);
+    //dst.pixels = (uint32_t*) heap_caps_malloc(NEW_IMAGE_SIZE* NEW_IMAGE_SIZE*4 , MALLOC_CAP_32BIT);
     dst.w = NEW_IMAGE_SIZE;
     dst.h = NEW_IMAGE_SIZE;
 
@@ -253,11 +263,10 @@ void loop() {
     //or
     #else
         //amg.updatePixelMatrix();
-        //get_person_in_zones_with_max(dst.pixels, dst.w, dst.h);
+        get_person_in_zones_with_max(dst.pixels, dst.w, dst.h);
     #endif
     
-    
-    //count_person();
+    count_person();
   
     #ifdef DEBUG
     //Print out the interrupt matrix.
@@ -274,6 +283,7 @@ void loop() {
     }
     #endif
 
+    //free(dst.pixels);
     //delete dst.pixels;
     intReceived = false;
   }
