@@ -1,5 +1,6 @@
 #include "image_proc.h"
 #include <Melopero_AMG8833.h>
+#include <ArduinoQueue.h>
 Melopero_AMG8833 amg;
 
 /* Hardware connection must be as follows: 
@@ -16,12 +17,14 @@ Melopero_AMG8833 amg;
 
 #define   DEBUG   1                         //DEBUG MACRO
 //#define   SIMPLE_COUNT    1               //ALGORITHM TO BE EXECUTED MACRO
-#define   AVERAGE_TEMP_FROM_MATRIX      1   //ALGORITHM TO BE EXECUTED MACRO, IN THIS CASE WE TAKE THE AVERAGE TEMPERATURE OF SCALED IMAGE
-//#define   AVERAGE_TEMP_FROM_THERMISTOR    1
+//#define   AVERAGE_TEMP_FROM_MATRIX      1   //ALGORITHM TO BE EXECUTED MACRO, IN THIS CASE WE TAKE THE AVERAGE TEMPERATURE OF SCALED IMAGE, to check this algo , i might muust update number of interruptions
+#define   AVERAGE_TEMP_FROM_THERMISTOR    1   //Triggering pixels will be compared with temperature taken from thermistor
+#define   NUMBER_OF_ZONES  3
+
 
 //The high and low temperature thresholds. If a temperature that exceeds these values is detected an interrupt will be triggered. The temperatures
 //are expressed in Celsius degrees.
-float highThreshold = 25.0;
+float highThreshold = 24.0;
 float lowThreshold = 18;
 
 volatile bool intReceived = false;
@@ -36,56 +39,20 @@ const byte interruptPin = 3;
 
 //Structs to get person counter
 typedef struct{
-  int previous_state; //This states contain the number of persons in each zone
-  int current_state;
+  int zone_1; //This states contain the number of persons in each zone
+  int zone_2;
 }Zones;
 
-Zones zone_1{0,0};
-Zones zone_2{0,0};
-
+ArduinoQueue<Zones> zones_interrupt_Queue(NUMBER_OF_ZONES);
 uint16_t person_counter = 0;
 int interrupt_no;
 
 
-//The interrupt servire routine. This function will be called each time the 
-//interrupt is triggered.
-void onInterrupt(){
-  intReceived = true;
-}
-
 /***************************Function definitions*************************/
 
-//Will help to determine the number of persons in the temperature matrix
-void get_person_in_zones(bool pixels[8][8]){
-  //Depending on height param, we will count the 1's in both zones and count people
-  int ones = 0;
-  //Analyzing zone 1
-  for(int i=0; i<4; i++){
-    for(int j=0; j<8; j++){
-        if ( pixels[i][j] == 1) ones++;
-      }  
-  }
-  zone_1.previous_state = zone_1.current_state;
-  zone_1.current_state = ones/2;    //En vez de dividir entre dos, podemos hacer pruebas y ajustar con la altura incluso crear una mascara para saber cuantas personas hay
-
-  ones = 0;
-  //Analyzing zone 2
-  for(int i=4; i<8; i++){
-    for(int j=0; j<8; j++){
-        if ( pixels[i][j] == 1) ones++;
-      }  
-  }
-  zone_2.previous_state = zone_2.current_state;
-  zone_2.current_state = ones/2;    //En vez de dividir entre dos, podemos hacer pruebas y ajustar con la altura
-
-  #ifdef DEBUG
-      Serial.print("Pixels in Zone 1 is:");
-      Serial.println(zone_1.current_state);
-      Serial.print("Pixels in Zone 2 is:");
-      Serial.println(zone_2.current_state);
-
-  #endif
-  
+//The interrupt service routine will be called each time the interrupt is triggered.
+void onInterrupt(){
+  intReceived = true;
 }
 
 //void get_person_in_zones_with_max(float pixels[8][8]){
@@ -94,6 +61,7 @@ void get_person_in_zones_with_max(uint32_t* pixels, uint8_t width, uint8_t heigh
   int ones = 0;
   static float average = 0.0;
   static float average2 = 0.0;
+  Zones zone_temp={0,0};
   
   #ifdef   AVERAGE_TEMP_FROM_MATRIX
       if( interrupt_no == 1 ){
@@ -110,8 +78,9 @@ void get_person_in_zones_with_max(uint32_t* pixels, uint8_t width, uint8_t heigh
         Serial.println(average);
       }
   #elif   AVERAGE_TEMP_FROM_THERMISTOR
-      amg.updateThermistorTemperature();       //Update AMGs thermistor temperature and print it.
-      average = amg.thermistorTemperature;
+      //amg.updateThermistorTemperature();       //Update AMGs thermistor temperature and print it.
+      //average = amg.thermistorTemperature - 2.0;
+      average = highThreshold - 2.0;
   #endif
   
   //Analyzing zone 1
@@ -120,8 +89,8 @@ void get_person_in_zones_with_max(uint32_t* pixels, uint8_t width, uint8_t heigh
       if ( *(pixels+(width*i)+j) > average) ones++;
      }
   }
-  zone_1.previous_state = zone_1.current_state;
-  zone_1.current_state = ones/2;    //Counting values which are above average temperature 
+
+  zone_temp.zone_1 = ones;    //Getting maximum values
 
   ones = 0;
   #ifdef   AVERAGE_TEMP_FROM_MATRIX
@@ -136,8 +105,9 @@ void get_person_in_zones_with_max(uint32_t* pixels, uint8_t width, uint8_t heigh
         average2/=(width*height/2);
       }
   #elif   AVERAGE_TEMP_FROM_THERMISTOR
-      amg.updateThermistorTemperature();       //Update AMGs thermistor temperature and print it.
-      average2 = amg.thermistorTemperature;
+      /*amg.updateThermistorTemperature();       //This measurement is done only once at the beginning of the function
+      average2 = amg.thermistorTemperature; */   
+      average2 = average;
   #endif
   
   //Analyzing zone 2
@@ -145,17 +115,30 @@ void get_person_in_zones_with_max(uint32_t* pixels, uint8_t width, uint8_t heigh
       for(int j = 0; j < height; j++){
         if ( *(pixels+(width*i)+j) > average2) ones++;
       }
+    }  
+    zone_temp.zone_2 = ones;
+
+    if( zones_interrupt_Queue.isFull() ){
+        zones_interrupt_Queue.dequeue();    ///If queue is full, dequeue last element to enqueue the newest one
     }
-  zone_2.previous_state = zone_2.current_state;
-  zone_2.current_state = ones/2;   
+    zones_interrupt_Queue.enqueue(zone_temp);
 }
 
+//Count persons using 3 phase algorithm, that means we will need at least three triggering interrupts before this function starts counting persons
 void count_person(){
+  if( !zones_interrupt_Queue.isFull() ){
+    return;   //If we don't have at least the three zones detected then don't count persons
+  }
   //Moving from zone 1 to zone 2 means leaving the room
-  if(  zone_2.current_state >  zone_2.previous_state ){
-    if (  zone_1.current_state <  zone_1.previous_state  ){
-      person_counter--;
-      #ifdef DEBUG
+  int temp = zones_interrupt_Queue.getHead().zone_1;
+  int temp2 = zones_interrupt_Queue.getHead().zone_2;
+  zones_interrupt_Queue.dequeue();    //dequeue to access the 2 most recent zone structs
+
+  if( zones_interrupt_Queue.getHead().zone_1 <= temp  ){
+    if(  zones_interrupt_Queue.getHead().zone_2 > temp2 ){
+      if ( zones_interrupt_Queue.getTail().zone_2  <= zones_interrupt_Queue.getHead().zone_2   ){
+        person_counter--;
+        #ifdef DEBUG
           digitalWrite(LED_PERSON_LEFT, HIGH);
           delay(100);
           digitalWrite(LED_PERSON_LEFT, LOW);
@@ -163,15 +146,17 @@ void count_person(){
           digitalWrite(LED_PERSON_LEFT, HIGH);
           delay(100);
           digitalWrite(LED_PERSON_LEFT, LOW);
-      #endif
+        #endif
+      }
     }
   }
 
   //Moving from zone 2 to zone 1 means getting into the room
-  if(  zone_2.current_state <  zone_2.previous_state ){
-    if (  zone_1.current_state >  zone_1.previous_state  ){
-      person_counter++;
-      #ifdef DEBUG
+  if ( zones_interrupt_Queue.getHead().zone_2 <= temp2 ){
+    if(  zones_interrupt_Queue.getHead().zone_1 > temp ){
+      if (  zones_interrupt_Queue.getTail().zone_1  <= zones_interrupt_Queue.getHead().zone_1  ){
+        person_counter++;
+        #ifdef DEBUG
           digitalWrite(LED_PERSON_ENTERED, HIGH);
           delay(100);
           digitalWrite(LED_PERSON_ENTERED, LOW);
@@ -179,14 +164,13 @@ void count_person(){
           digitalWrite(LED_PERSON_ENTERED, HIGH);
           delay(100);
           digitalWrite(LED_PERSON_ENTERED, LOW);
-      #endif
+        #endif
+      }
     }
   }
   Serial.print("Person counter is:");
   Serial.println(person_counter);
 }
-
-
 
 void setup() {
   Serial.begin(115200);
@@ -228,22 +212,17 @@ void setup() {
     
 }
 
-void core0(void* args){
-  while(1){
-  }
-}
-
 
 void loop() {
-    //Check if an interrupt occurred.
-  //The interrupt occurred flag gets set by the interrupt service routine
-  //each time an interrupt is triggered.
+  //Checking whether an interrupt has occurred.
   if (intReceived){
 
     /* Below definitons are executed to get an interpolated temperature image
      * the dimensions are determined by IMAGE_SIZE_UP_FACTOR macro
      */
-    interrupt_no < 2 ? interrupt_no++ : interrupt_no = 1;
+    #ifdef   AVERAGE_TEMP_FROM_MATRIX
+        interrupt_no < 2 ? interrupt_no++ : interrupt_no = 1; 
+    #endif
     amg.updatePixelMatrix(); // This might be executed later
     uint32_t pixelptr[SENSOR_SIZE_PIXELS*SENSOR_SIZE_PIXELS];
     for(int i = 0; i < SENSOR_SIZE_PIXELS; i++){
@@ -285,8 +264,6 @@ void loop() {
     Serial.print("**** interrupt received! **** \t at Temperature: ");
     Serial.print(amg.thermistorTemperature);
     Serial.println("°C");
-    //Serial.println("Interrupt Matrix: ");
-    //amg.updateInterruptMatrix();
     for (int x = 1; x <= (NEW_IMAGE_SIZE * NEW_IMAGE_SIZE); x++){
       Serial.print( dst.pixels[x-1]);
       Serial.print(", ");
