@@ -119,7 +119,9 @@ void get_person_in_zones_with_max(uint32_t* pixels, uint8_t width, uint8_t heigh
     zone_temp.zone_2 = ones;
 
     if( zones_interrupt_Queue.isFull() ){
-        zones_interrupt_Queue.dequeue();    ///If queue is full, dequeue last element to enqueue the newest one
+        zones_interrupt_Queue.dequeue();    ///If queue is full, dequeue all elements to enqueue the newest one
+        zones_interrupt_Queue.dequeue();
+        zones_interrupt_Queue.dequeue();
     }
     zones_interrupt_Queue.enqueue(zone_temp);
 }
